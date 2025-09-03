@@ -2,16 +2,18 @@
 
 # Includes both richness and abundance
 
+{
 library(tidyverse)
 library(wildrtrax)
 
 library(lme4)
+library(glmmTMB)
 library(unmarked)
-
+library(terra)
 library(MuMIn)                # model selection
 library(effects)            
 library(emmeans)              # for estimating marginal means
-
+}
 
 # Prep Diversity Data --------------------------------------------------------------
 
@@ -77,6 +79,8 @@ write_csv(div_dat, "dat/div_dat.csv")
 
 # Naive --------------------------------------------------------------------
 
+div_dat <- read_csv("dat/div_dat.csv")
+
 table(div_dat$Year, div_dat$LCC2)
 
 richness_estimates <- div_dat |> 
@@ -88,7 +92,7 @@ mean(richness_estimates$mean_raw)
 
 # GLMM ---------------------------------------------------------------------
 
-div_dat <- read_csv("dat/div_dat.csv")
+library(glmmTMB)
 
 # Richness
 div_dat$DUR <- as.numeric(div_dat$DUR)
@@ -158,7 +162,7 @@ richness_glmm <- div_dat |>
 richness_estimates <- richness_estimates |> 
   left_join(richness_glmm, by = "location")
 
-mean(richness_estimates$rich_predict)
+mean(richness_estimates$mean_glmm)
 
 
 # N-Mixture ----------------------------------------------------------------
@@ -166,9 +170,7 @@ mean(richness_estimates$rich_predict)
 library(unmarked)
 library(tidyr)
 library(dplyr)
-
-# Read data
-div_dat <- read_csv("dat/div_dat.csv")
+library(tidyverse)
 
 # Create visit order within site-year
 div_dat <- div_dat %>%
@@ -322,15 +324,67 @@ plot(richness_estimates$mean_glmm, richness_estimates$mean_nmixture)
 cor_mat <- cor(richness_estimates[3:5],
                use = "pairwise.complete.obs",
                method = "spearman")
+cor_mat
+
+richness_estimates <- richness_estimates |> 
+  left_join(loc_preds, by = c("location", "Year"))
+
+richness_estimates <- st_as_sf(richness_estimates,
+                              coords = c("longitude", "latitude"), crs = 4326)
+
+write_csv(richness_estimates, "dat/richness_estimates.csv")
+st_write(richness_estimates, "dat/richness_estimates.gpkg")
+
 
 # Map ----------------------------------------------------------------------
 
-richness_nmixture <- bind_cols(loc_preds, richness_nmixture)
+library(sf)
+library(leaflet)
+library(RColorBrewer)
+library(scales)
 
-richness_nmixture <- st_as_sf(richness_nmixture,
-                              coords = c("longitude", "latitude"), crs = 4326)
+richness_estimates <- st_read("dat/richness_estimates.gpkg")
 
-mapview(richness_nmixture, zcol = "Predicted", 
-        cex = "Predicted")
+fp_path <- "C:/Users/jeff.matheson/OneDrive - Tetra Tech, Inc/Documents/GIS_Projects/Crown_Mountain/footprint/Project_Footprint.shp"
 
+fp_path <- "C:/Users/jeff.matheson/OneDrive - Tetra Tech, Inc/Documents/R_Projects/cm_birds/dat/Project_Footprint/Project_Footprint.shp"
+
+fp <- st_read(fp_path) |> st_transform(crs = 4326) |> st_zm()
+
+plot(fp)
+
+
+# Define the palette using RColorBrewer
+pal <- colorNumeric(
+  palette = (brewer.pal(9, "YlOrRd")),  # blue → green → red
+  domain = richness_estimates$mean_nmixture
+)
+
+leaflet(richness_estimates) |>
+  addTiles() |>
+  addPolygons(
+    data = fp,
+    fillOpacity = 0.5
+  ) |>
+  addCircleMarkers(
+    radius = ~scales::rescale(mean_nmixture^2, c(2, 20)),  # size scaling
+#    radius = ~mean_nmixture,
+    color = ~pal(mean_nmixture),                   # apply color palette
+    stroke = FALSE,
+    fillOpacity = 0.5
+  ) |>
+  addLegend(
+    "bottomright",
+    pal = pal,
+    values = ~mean_nmixture,
+    title = "Predicted"
+  )
+
+
+
+
+
+leaflet() |>
+  addTiles() |> 
+  addPolygons(data = fp)
 
